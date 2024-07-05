@@ -1,18 +1,26 @@
 package main
 
 import (
+	"fmt"
+	"html/template"
 	"net/http"
 	"time"
-	"html/template"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Post struct {
 	Author    string
 	Content   string
 	Timestamp string
+}
+
+type User struct {
+	ID       int
+	Username string
+	Password string // Note: This should be hashed before storage
 }
 
 // Function to generate mock data
@@ -36,52 +44,163 @@ func GenerateMockPosts() []Post {
 	}
 }
 
-var templates = template.Must(template.ParseGlob("templates/*.tmpl"))
-// Assuming you have a global variable for mock posts
-var mockPosts = GenerateMockPosts()
+func GenerateMockUsers() []User {
+	password := "test"
+	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 
-func addPostHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "POST" {
-		r.ParseForm()
-		content := r.FormValue("content")
-		// Create a new Post
-		newPost := Post{
-			Author:    "Anonymous", // Update this as needed
-			Content:   content,
-			Timestamp: time.Now().Format("Jan 02, 2006"),
-		}
-		// Append to mock posts (assuming mockPosts is your global variable)
-
-		//add new post to the beginning of the slice
-		mockPosts = append([]Post{newPost}, mockPosts...)
-		// Redirect to home page to see the new post
-		http.Redirect(w, r, "/", http.StatusFound)
+	return []User{
+		{
+			ID:       1,
+			Username: "test",
+			Password: string(hashedPassword),
+		},
 	}
 }
 
-func main() {
-    router := chi.NewRouter()
+var templates = template.Must(template.ParseGlob("templates/*.tmpl"))
 
-    // Middleware
-    router.Use(middleware.Logger)
-    router.Use(middleware.Recoverer)
+// Assuming you have a global variable for mock posts
+var mockPosts = GenerateMockPosts()
+var mockUsers = GenerateMockUsers()
 
-    // Serve static files
-    router.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
-	// Register the add post handler
-	router.Post("/add-post", addPostHandler)
-    // Define a route
-    router.Get("/", func(w http.ResponseWriter, r *http.Request) {
-        //posts := GenerateMockPosts()
-        err := templates.ExecuteTemplate(w, "index", map[string]interface{}{
-            "title": "Main website",
-            "Posts": mockPosts,
-        })
+func addPostHandler(w http.ResponseWriter, r *http.Request) {
+    if r.Method == "POST" {
+        r.ParseForm()
+        content := r.FormValue("content")
+
+        // Retrieve session cookie
+        sessionCookie, err := r.Cookie("session")
+        var username string
         if err != nil {
-            http.Error(w, err.Error(), http.StatusInternalServerError)
+            // If there's an error (e.g., cookie not found), default to "Anonymous"
+            username = "Anonymous"
+        } else {
+            // Extract username from session cookie
+            username = sessionCookie.Value
         }
-    })
 
-    // Start the server
-    http.ListenAndServe(":8080", router)
+        // Create a new Post with the username as the author
+        newPost := Post{
+            Author:    username, // Use the username from the session cookie
+            Content:   content,
+            Timestamp: time.Now().Format("Jan 02, 2006"),
+        }
+        mockPosts = append([]Post{newPost}, mockPosts...)
+        http.Redirect(w, r, "/", http.StatusFound)
+    }
+}
+
+func registerHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" {
+		r.ParseForm()
+		username := r.FormValue("username")
+		password := r.FormValue("password")
+		// Hash password
+		hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		// Store the user
+		storeUser(username, string(hashedPassword))
+		http.Redirect(w, r, "/", http.StatusFound)
+	} else {
+		// Render registration form
+		fmt.Println("Registration page")
+	}
+}
+
+func storeUser(username, password string) {
+	// Add user to the mock User storage
+	mockUsers = append(mockUsers, User{
+		ID:       len(mockUsers) + 1,
+		Username: username,
+		Password: password,
+	})
+}
+
+func getUserByUsername(username string) (User, error) {
+	//get mock user by username
+	for _, user := range mockUsers {
+		if user.Username == username {
+			return user, nil
+		}
+	}
+	return User{}, fmt.Errorf("User not found")
+}
+
+func setSession(user User, w http.ResponseWriter) {
+	// Set session cookie
+	fmt.Println("Setting session cookie")
+	http.SetCookie(w, &http.Cookie{
+		Name:    "session",
+		Value:   user.Username,
+		Expires: time.Now().Add(24 * time.Hour),
+	})
+}
+
+func loginHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" {
+		r.ParseForm()
+		username := r.FormValue("username")
+		password := r.FormValue("password")
+		// Retrieve user from storage and compare password
+		fmt.Println("Login request")
+		user, err := getUserByUsername(username)
+		if err != nil {
+			// Handle user not found
+			fmt.Println("User not found")
+		}
+
+		err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
+		if err == nil {
+			// Passwords match
+			// Set user session
+			// Example: setSession(user, w)
+			fmt.Println("Setting session cookie")
+			setSession(user, w)
+			http.Redirect(w, r, "/", http.StatusFound)
+		} else {
+			fmt.Println("Passwords do not match")
+		}
+	} else {
+		fmt.Println("Login page")
+	}
+}
+
+func homeHandler(w http.ResponseWriter, r *http.Request) {
+	err := templates.ExecuteTemplate(w, "index", map[string]interface{}{
+		"title": "Main website",
+		"Posts": mockPosts,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check if user is logged in
+		// Example: if !userIsLoggedIn(r) {
+		fmt.Println("Checking if user is logged in")
+		if false { // Placeholder condition
+			http.Redirect(w, r, "/", http.StatusFound)
+		} else {
+			next.ServeHTTP(w, r)
+		}
+	})
+}
+
+func main() {
+	router := chi.NewRouter()
+
+	// Middleware
+	router.Use(middleware.Logger)
+	router.Use(authMiddleware) // Apply auth middleware globally or to specific routes
+
+	// Routes
+	router.Get("/", homeHandler)
+	router.Post("/add-post", addPostHandler)
+	router.Get("/login", loginHandler)
+	router.Post("/login", loginHandler)
+	router.Get("/register", registerHandler)
+	router.Post("/register", registerHandler)
+
+	http.ListenAndServe(":8080", router)
 }
