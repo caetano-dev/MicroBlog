@@ -12,6 +12,8 @@ import (
 )
 
 type Post struct {
+	ID        int
+	UserID    int
 	Author    string
 	Content   string
 	Timestamp string
@@ -20,24 +22,32 @@ type Post struct {
 type User struct {
 	ID       int
 	Username string
-	Password string // Note: This should be hashed before storage
+	Password string
+}
+
+type PostWithAuthor struct {
+	Post
+	Username string
 }
 
 // Function to generate mock data
 func GenerateMockPosts() []Post {
 	return []Post{
 		{
-			Author:    "Jane Jane",
+			ID:        1,
+			UserID:    1,
 			Content:   "I like eating rocks.",
 			Timestamp: time.Now().Add(-48 * time.Hour).Format("Jan 02, 2006"),
 		},
 		{
-			Author:    "John Smith",
+			ID:        2,
+			UserID:    2,
 			Content:   "This is another interesting post.",
 			Timestamp: time.Now().Add(-24 * time.Hour).Format("Jan 02, 2006"),
 		},
 		{
-			Author:    "Alice and Bob",
+			ID:        3,
+			UserID:    1,
 			Content:   "Here's some more insightful content.",
 			Timestamp: time.Now().Format("Jan 02, 2006"),
 		},
@@ -45,16 +55,36 @@ func GenerateMockPosts() []Post {
 }
 
 func GenerateMockUsers() []User {
-	password := "test"
+	password := "1234"
 	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 
 	return []User{
 		{
 			ID:       1,
-			Username: "test",
+			Username: "user1",
+			Password: string(hashedPassword),
+		},
+		{
+			ID:       2,
+			Username: "user2",
 			Password: string(hashedPassword),
 		},
 	}
+}
+
+func GenerateMockPostsWithAuthors() []PostWithAuthor {
+	var postsWithAuthors []PostWithAuthor
+	for _, post := range mockPosts {
+		user, err := getUserByID(post.UserID)
+		if err != nil {
+			continue
+		}
+		postsWithAuthors = append(postsWithAuthors, PostWithAuthor{
+			Post:     post,         
+			Username: user.Username,
+		})
+	}
+	return postsWithAuthors
 }
 
 var templates = template.Must(template.ParseGlob("templates/*.tmpl"))
@@ -62,32 +92,46 @@ var templates = template.Must(template.ParseGlob("templates/*.tmpl"))
 // Assuming you have a global variable for mock posts
 var mockPosts = GenerateMockPosts()
 var mockUsers = GenerateMockUsers()
+var mockPostsWithAuthors = GenerateMockPostsWithAuthors()
 
 func addPostHandler(w http.ResponseWriter, r *http.Request) {
-    if r.Method == "POST" {
-        r.ParseForm()
-        content := r.FormValue("content")
+	fmt.Print("Add post handler")
+	if r.Method == "POST" {
+		r.ParseForm()
+		content := r.FormValue("content")
 
-        // Retrieve session cookie
-        sessionCookie, err := r.Cookie("session")
-        var username string
-        if err != nil {
-            // If there's an error (e.g., cookie not found), default to "Anonymous"
-            username = "Anonymous"
-        } else {
-            // Extract username from session cookie
-            username = sessionCookie.Value
-        }
+		// Retrieve session cookie
+		currentUsernameCookie, err := r.Cookie("username")
+		if err != nil {
+			http.Redirect(w, r, "/?error=invalid_credentials", http.StatusFound)
+			return
+		}
+		// set currentUsernameCookie as username
+		currentUsername := currentUsernameCookie.Value
 
-        // Create a new Post with the username as the author
-        newPost := Post{
-            Author:    username, // Use the username from the session cookie
-            Content:   content,
-            Timestamp: time.Now().Format("Jan 02, 2006"),
-        }
-        mockPosts = append([]Post{newPost}, mockPosts...)
-        http.Redirect(w, r, "/", http.StatusFound)
-    }
+		currentUser, err := getUserByUsername(currentUsername)
+		if err != nil {
+			http.Redirect(w, r, "/?error=invalid_credentials", http.StatusFound)
+			return
+		}
+
+		userID := currentUser.ID
+
+		// Create a new Post with the username as the author
+		newPost := Post{
+			ID:        len(mockPosts) + 1,
+			UserID:    userID,
+			Author:    currentUsername,
+			Content:   content,
+			Timestamp: time.Now().Format("Jan 02, 2006"),
+		}
+		mockPosts = append([]Post{newPost}, mockPosts...)
+
+		mockPostsWithAuthors = GenerateMockPostsWithAuthors()
+
+		fmt.Println("New post added")
+		http.Redirect(w, r, "/", http.StatusFound)
+	}
 }
 
 func registerHandler(w http.ResponseWriter, r *http.Request) {
@@ -95,9 +139,7 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		username := r.FormValue("username")
 		password := r.FormValue("password")
-		// Hash password
 		hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-		// Store the user
 		storeUser(username, string(hashedPassword))
 		http.Redirect(w, r, "/", http.StatusFound)
 	} else {
@@ -107,7 +149,6 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func storeUser(username, password string) {
-	// Add user to the mock User storage
 	mockUsers = append(mockUsers, User{
 		ID:       len(mockUsers) + 1,
 		Username: username,
@@ -129,7 +170,7 @@ func setSession(user User, w http.ResponseWriter) {
 	// Set session cookie
 	fmt.Println("Setting session cookie")
 	http.SetCookie(w, &http.Cookie{
-		Name:    "session",
+		Name:    "username",
 		Value:   user.Username,
 		Expires: time.Now().Add(24 * time.Hour),
 	})
@@ -169,12 +210,22 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 func homeHandler(w http.ResponseWriter, r *http.Request) {
 	err := templates.ExecuteTemplate(w, "index", map[string]interface{}{
 		"title": "Main website",
-		"Posts": mockPosts,
+		"Posts": mockPostsWithAuthors,
 		"error": r.URL.Query().Get("error"),
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func getUserByID(userID int) (User, error) {
+	//get mock user by userID
+	for _, user := range mockUsers {
+		if user.ID == userID {
+			return user, nil
+		}
+	}
+	return User{}, fmt.Errorf("User not found")
 }
 
 func authMiddleware(next http.Handler) http.Handler {
@@ -183,6 +234,7 @@ func authMiddleware(next http.Handler) http.Handler {
 		// Example: if !userIsLoggedIn(r) {
 		fmt.Println("Checking if user is logged in")
 		if false { // Placeholder condition
+			// TODO: ask user to login
 			http.Redirect(w, r, "/", http.StatusFound)
 		} else {
 			next.ServeHTTP(w, r)
@@ -217,4 +269,3 @@ func main() {
 
 	http.ListenAndServe(":8080", router)
 }
-
