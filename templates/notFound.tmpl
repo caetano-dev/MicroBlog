@@ -1,0 +1,29 @@
+{{define "notfound"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Page Not Found - MicroBlog</title>
+	<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+	<nav class="bg-blue-600 p-4">
+		<div class="container mx-auto flex justify-between items-center">
+			<a href="/" class="text-white text-2xl font-bold">MicroBlog</a>
+			<div>
+				<a href="/register" class="text-white hover:text-blue-200 mx-2">Register</a>
+				<a href="/more-info" class="text-white hover:text-blue-200 mx-2">More Info</a>
+			</div>
+		</div>
+	</nav>
+	<div class="container mx-auto mt-8 flex justify-center">
+		<div class="w-1/2 text-center">
+			<h1 class="text-3xl font-bold mb-6">404 - Page Not Found</h1>
+			<p class="mb-6">The page you are looking for might have been removed, had its name changed, is temporarily unavailable, or does not exist.</p>
+			<a href="/" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Go to Homepage</a>
+		</div>
+	</div>
+</body>
+</html>
+{{end}}

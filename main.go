@@ -158,6 +158,8 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/", http.StatusFound)
 		} else {
 			fmt.Println("Passwords do not match")
+			http.Redirect(w, r, "/?error=invalid_credentials", http.StatusFound)
+			// show massage in html saying that passwords do no match
 		}
 	} else {
 		fmt.Println("Login page")
@@ -168,6 +170,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	err := templates.ExecuteTemplate(w, "index", map[string]interface{}{
 		"title": "Main website",
 		"Posts": mockPosts,
+		"error": r.URL.Query().Get("error"),
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -187,6 +190,13 @@ func authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+func notFoundHandler(w http.ResponseWriter) {
+	err := templates.ExecuteTemplate(w, "notfound", nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
 func main() {
 	router := chi.NewRouter()
 
@@ -201,6 +211,10 @@ func main() {
 	router.Post("/login", loginHandler)
 	router.Get("/register", registerHandler)
 	router.Post("/register", registerHandler)
+	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		notFoundHandler(w)
+	})
 
 	http.ListenAndServe(":8080", router)
 }
+
